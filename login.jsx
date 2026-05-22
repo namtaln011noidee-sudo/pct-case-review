@@ -25,7 +25,14 @@ function LoginScreen({ store, onToast }) {
         if (pw.length < 6) { setErr("รหัสผ่านอย่างน้อย 6 ตัวอักษร"); return; }
         const r = await store.register({ name, email, pw, role, dept });
         if (!r.ok) setErr(r.error);
-        else onToast("ลงทะเบียนสำเร็จ");
+        else if (r.needConfirm) {
+          // Supabase requires email confirmation — account created, not yet logged in
+          setErr("");
+          setMode("login");
+          onToast("สร้างบัญชีสำเร็จ! กรุณายืนยันอีเมลแล้วกลับมาเข้าสู่ระบบ");
+        } else {
+          onToast("ลงทะเบียนสำเร็จ");
+        }
       }
     } finally {
       setBusy(false);

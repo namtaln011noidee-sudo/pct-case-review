@@ -190,8 +190,9 @@ function useStore() {
         if (!data.user) return { ok: false, error: "ลงทะเบียนไม่สำเร็จ กรุณาลองใหม่" };
 
         // No session = Supabase requires email confirmation
+        // Account is created — user just needs to verify email then log in
         if (!data.session) {
-          return { ok: false, error: "กรุณาตรวจสอบกล่องอีเมลและคลิกลิงก์ยืนยัน จากนั้นกลับมาเข้าสู่ระบบ" };
+          return { ok: true, needConfirm: true };
         }
 
         // Session available — upsert profile (trigger is also a fallback)
