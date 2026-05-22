@@ -50,10 +50,19 @@ function App() {
     const data = nextStatus ? { ...editing, status: nextStatus } : editing;
     let id = editingId;
     if (id) {
-      await store.updateCase(id, data);
+      const result = await store.updateCase(id, data);
+      if (result && !result.ok) {
+        showToast("⚠️ บันทึกไม่สำเร็จ: " + result.error);
+        return null;
+      }
       showToast("บันทึกข้อมูลแล้ว");
     } else {
-      id = await store.addCase(data);
+      const result = await store.addCase(data);
+      if (!result || !result.ok) {
+        showToast("⚠️ บันทึกไม่สำเร็จ: " + (result?.error || "กรุณาลองใหม่"));
+        return null;
+      }
+      id = result.id;
       setEditingId(id);
       showToast("เพิ่มเคสใหม่เรียบร้อย");
     }
@@ -189,7 +198,12 @@ function App() {
               users={store.state.users}
               onOpen={(id) => openCase(id, "menu1")}
               onNew={startNew}
-              onDelete={async (id) => { await store.deleteCase(id); showToast("ลบเคสแล้ว"); if (editingId === id) { setEditing(null); setEditingId(null); } }}
+              onDelete={async (id) => {
+                const result = await store.deleteCase(id);
+                if (result && !result.ok) { showToast("⚠️ ลบไม่สำเร็จ: " + result.error); return; }
+                showToast("ลบเคสแล้ว");
+                if (editingId === id) { setEditing(null); setEditingId(null); }
+              }}
               currentUser={u}
             />
           )}

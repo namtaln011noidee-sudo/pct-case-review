@@ -155,14 +155,26 @@ function useStore() {
       try {
         const { data, error } = await sb().auth.signInWithPassword({ email, password: pw });
         if (error) return { ok: false, error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
-        const [profile, cases, users] = await Promise.all([
-          fetchProfile(data.user.id),
-          fetchCases(),
-          fetchProfiles(),
-        ]);
+
+        // Fetch or auto-create profile (in case trigger didn't fire)
+        let profile = await fetchProfile(data.user.id);
+        if (!profile) {
+          const meta = data.user.user_metadata || {};
+          await sb().from("profiles").upsert({
+            id:   data.user.id,
+            name: meta.name || data.user.email?.split("@")[0] || "ผู้ใช้",
+            role: meta.role || "user",
+            dept: meta.dept || "",
+          });
+          profile = await fetchProfile(data.user.id);
+        }
+        if (!profile) return { ok: false, error: "ไม่พบข้อมูลผู้ใช้ กรุณาติดต่อผู้ดูแลระบบ" };
+
+        const [cases, users] = await Promise.all([fetchCases(), fetchProfiles()]);
         setState({ users, currentUser: profile, cases, loading: false });
         return { ok: true };
       } catch(e) {
+        console.error("login:", e);
         return { ok: false, error: "เกิดข้อผิดพลาด กรุณาลองใหม่" };
       }
     },
@@ -175,14 +187,23 @@ function useStore() {
           options: { data: { name, role: role || "user", dept: dept || "" } },
         });
         if (error) return { ok: false, error: error.message };
-        if (!data.user) return { ok: false, error: "กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ" };
+        if (!data.user) return { ok: false, error: "ลงทะเบียนไม่สำเร็จ กรุณาลองใหม่" };
+
+        // No session = Supabase requires email confirmation
+        if (!data.session) {
+          return { ok: false, error: "กรุณาตรวจสอบกล่องอีเมลและคลิกลิงก์ยืนยัน จากนั้นกลับมาเข้าสู่ระบบ" };
+        }
+
+        // Session available — upsert profile (trigger is also a fallback)
         await sb().from("profiles").upsert({
           id: data.user.id, name, role: role || "user", dept: dept || "",
         });
+        const [cases, users] = await Promise.all([fetchCases(), fetchProfiles()]);
         const profile = { id: data.user.id, name, role: role || "user", dept: dept || "" };
-        setState(s => ({ ...s, currentUser: profile, users: [...s.users, profile] }));
+        setState({ users, currentUser: profile, cases, loading: false });
         return { ok: true };
       } catch(e) {
+        console.error("register:", e);
         return { ok: false, error: "เกิดข้อผิดพลาด กรุณาลองใหม่" };
       }
     },
@@ -194,29 +215,43 @@ function useStore() {
 
     async addCase(c) {
       const { data: { session } } = await sb().auth.getSession();
+      if (!session) {
+        return { ok: false, error: "หมดเวลาเข้าสู่ระบบ กรุณาล็อกอินใหม่อีกครั้ง" };
+      }
       const id   = "c" + Math.random().toString(36).slice(2, 9);
       const full = {
         ...c, id,
-        createdBy: session?.user?.id || "",
+        createdBy: session.user.id,
         createdAt: new Date().toISOString().slice(0, 10),
         status:    c.status || "draft",
       };
       const { error } = await sb().from("cases").insert(caseToDb(full));
-      if (error) { console.error("addCase:", error); return null; }
+      if (error) {
+        console.error("addCase:", error);
+        return { ok: false, error: error.message || "บันทึกไม่สำเร็จ" };
+      }
       setState(s => ({ ...s, cases: [full, ...s.cases] }));
-      return id;
+      return { ok: true, id };
     },
 
     async updateCase(id, patch) {
       const { error } = await sb().from("cases").update(caseToDb(patch)).eq("id", id);
-      if (error) { console.error("updateCase:", error); return; }
+      if (error) {
+        console.error("updateCase:", error);
+        return { ok: false, error: error.message || "บันทึกไม่สำเร็จ" };
+      }
       setState(s => ({ ...s, cases: s.cases.map(c => c.id === id ? { ...c, ...patch } : c) }));
+      return { ok: true };
     },
 
     async deleteCase(id) {
       const { error } = await sb().from("cases").delete().eq("id", id);
-      if (error) { console.error("deleteCase:", error); return; }
+      if (error) {
+        console.error("deleteCase:", error);
+        return { ok: false, error: error.message || "ลบไม่สำเร็จ" };
+      }
       setState(s => ({ ...s, cases: s.cases.filter(c => c.id !== id) }));
+      return { ok: true };
     },
   };
 }
